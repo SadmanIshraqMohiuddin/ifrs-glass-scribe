@@ -4,6 +4,7 @@ import { SuggestionCards } from "@/components/SuggestionCards";
 import { ChatInput } from "@/components/ChatInput";
 import { UserProfile } from "@/components/UserProfile";
 import { ChatMessage } from "@/components/ChatMessage";
+import { ThinkingAnimation } from "@/components/ThinkingAnimation";
 
 interface Message {
   id: string;
@@ -17,6 +18,7 @@ interface Message {
 const Index = () => {
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [isThinking, setIsThinking] = useState(false);
 
   const handleNewChat = () => {
     setSelectedChat(null);
@@ -29,7 +31,7 @@ const Index = () => {
     setMessages([]);
   };
 
-  const handleSendMessage = (content: string) => {
+  const handleSendMessage = async (content: string) => {
     const userMessage: Message = {
       id: Date.now().toString(),
       type: "user",
@@ -38,19 +40,48 @@ const Index = () => {
     };
 
     setMessages(prev => [...prev, userMessage]);
+    setIsThinking(true);
 
-    // Simulate AI response
-    setTimeout(() => {
+    try {
+      const response = await fetch('http://192.168.0.143:8000/agent/run/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          question: content
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
         type: "ai",
-        content: `Based on IFRS 16, regarding your question about "${content.slice(0, 50)}...", here's my analysis:\n\n• Lease modifications should be assessed as separate leases if they increase scope and consideration proportionally\n• If not separate, remeasure lease liability using revised terms\n• Adjust right-of-use asset by difference in liability adjustment`,
-        confidence: Math.random() > 0.3 ? 0.85 : 0.65,
-        citations: ["IFRS 16.44", "IFRS 16.45", "IFRS 16.46"],
+        content: data.response,
+        confidence: 0.85, // Default confidence for now
+        citations: [], // Citations can be extracted from response if needed
         timestamp: new Date(),
       };
+      
       setMessages(prev => [...prev, aiMessage]);
-    }, 1000);
+    } catch (error) {
+      console.error('Error calling API:', error);
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        type: "ai",
+        content: "I apologize, but I'm having trouble connecting to the IFRS knowledge base right now. Please try again in a moment.",
+        confidence: 0.1,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsThinking(false);
+    }
   };
 
   const handleUploadFile = () => {
@@ -110,6 +141,7 @@ const Index = () => {
                     onEscalate={message.confidence && message.confidence < 0.7 ? handleEscalate : undefined}
                   />
                 ))}
+                {isThinking && <ThinkingAnimation />}
               </div>
             </div>
           )}
