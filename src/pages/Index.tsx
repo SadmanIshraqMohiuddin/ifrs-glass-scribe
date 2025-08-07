@@ -1,165 +1,205 @@
-import { useState } from "react";
-import { ChatSidebar } from "@/components/ChatSidebar";
-import { SuggestionCards } from "@/components/SuggestionCards";
-import { ChatInput } from "@/components/ChatInput";
-import { ScenarioFormData } from "@/components/ScenarioBuilder";
-import { UserProfile } from "@/components/UserProfile";
-import { ChatMessage } from "@/components/ChatMessage";
-import { ThinkingAnimation } from "@/components/ThinkingAnimation";
+import { useState, useRef, useEffect } from "react";
+import { Send } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { BackgroundInput } from "@/components/BackgroundInput";
+import { QuestionsInput } from "@/components/QuestionsInput";
+import { ChatResponse } from "@/components/ChatResponse";
+import { useToast } from "@/hooks/use-toast";
 
-interface Message {
-  id: string;
-  type: "user" | "ai";
-  content: string;
-  confidence?: number;
-  citations?: string[];
-  timestamp: Date;
+interface ChatMessage {
+  type: "answer" | "summary";
+  question?: string;
+  answer?: string;
+  summary?: string;
+  question_number?: number;
+  timestamp?: string;
 }
 
 const Index = () => {
-  const [selectedChat, setSelectedChat] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isThinking, setIsThinking] = useState(false);
+  const [background, setBackground] = useState("");
+  const [questions, setQuestions] = useState([""]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+  const { toast } = useToast();
 
-  const handleNewChat = () => {
-    setSelectedChat(null);
+  const handleSubmit = () => {
+    if (!background.trim()) {
+      toast({
+        title: "Background Required",
+        description: "Please provide a background description before submitting.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const validQuestions = questions.filter(q => q.trim());
+    if (validQuestions.length === 0) {
+      toast({
+        title: "Questions Required",
+        description: "Please add at least one question.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsLoading(true);
+    setIsSubmitted(true);
     setMessages([]);
-  };
 
-  const handleSelectChat = (chatId: string) => {
-    setSelectedChat(chatId);
-    // In a real app, load messages for this chat
-    setMessages([]);
-  };
+    // Create WebSocket connection
+    wsRef.current = new WebSocket("wss://104.248.169.227:8443/ws/rag/");
 
-  const handleSendMessage = async (content: string, scenario?: ScenarioFormData) => {
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      type: "user",
-      content,
-      timestamp: new Date(),
+    wsRef.current.onopen = () => {
+      const payload = {
+        type: "process_questions",
+        background: background.trim(),
+        questions: validQuestions,
+        model: "gpt-4o-mini"
+      };
+
+      wsRef.current?.send(JSON.stringify(payload));
     };
 
-    setMessages(prev => [...prev, userMessage]);
-    setIsThinking(true);
-
-    try {
-      const response = await fetch('http://192.168.0.143:8000/agent/run/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          question: content,
-          ...(scenario && {
-            scenario: scenario.scenario,
-            document_type: scenario.document_type,
-            company_name: scenario.company_name,
-          })
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+    wsRef.current.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === "answer" || data.type === "summary") {
+          const message: ChatMessage = {
+            ...data,
+            timestamp: new Date().toISOString()
+          };
+          
+          setMessages(prev => [...prev, message]);
+          
+          // Scroll to bottom
+          setTimeout(() => {
+            window.scrollTo({
+              top: document.body.scrollHeight,
+              behavior: 'smooth'
+            });
+          }, 100);
+        }
+      } catch (error) {
+        console.error("Error parsing WebSocket message:", error);
       }
+    };
 
-      const data = await response.json();
-      
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        type: "ai",
-        content: data.response,
-        confidence: 0.85, // Default confidence for now
-        citations: [], // Citations can be extracted from response if needed
-        timestamp: new Date(),
-      };
-      
-      setMessages(prev => [...prev, aiMessage]);
-    } catch (error) {
-      console.error('Error calling API:', error);
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        type: "ai",
-        content: "I apologize, but I'm having trouble connecting to the IFRS knowledge base right now. Please try again in a moment.",
-        confidence: 0.1,
-        timestamp: new Date(),
-      };
-      setMessages(prev => [...prev, errorMessage]);
-    } finally {
-      setIsThinking(false);
+    wsRef.current.onclose = () => {
+      setIsLoading(false);
+    };
+
+    wsRef.current.onerror = (error) => {
+      console.error("WebSocket error:", error);
+      setIsLoading(false);
+      toast({
+        title: "Connection Error",
+        description: "Failed to connect to IFRS Advisor. Please try again.",
+        variant: "destructive",
+      });
+    };
+  };
+
+  const handleReset = () => {
+    setBackground("");
+    setQuestions([""]);
+    setMessages([]);
+    setIsLoading(false);
+    setIsSubmitted(false);
+    if (wsRef.current) {
+      wsRef.current.close();
     }
   };
 
-  const handleUploadFile = () => {
-    console.log("File upload triggered");
-    // Add file upload logic here
-  };
+  // Cleanup WebSocket on unmount
+  useEffect(() => {
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, []);
 
-  const handleSuggestionClick = (suggestion: string) => {
-    handleSendMessage(suggestion);
-  };
-
-  const handleEscalate = () => {
-    console.log("Escalating to expert...");
-    // Add escalation logic here
-  };
-
-  const showWelcome = messages.length === 0;
+  const isFormValid = background.trim() && questions.some(q => q.trim());
 
   return (
-    <div className="h-screen bg-background flex">
-      {/* Sidebar */}
-      <ChatSidebar
-        selectedChat={selectedChat}
-        onSelectChat={handleSelectChat}
-        onNewChat={handleNewChat}
-      />
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col">
-        {/* Top Bar */}
-        <div className="h-16 border-b border-[hsl(var(--glass-border))] flex items-center justify-end px-6">
-          <UserProfile />
+    <div className="min-h-screen bg-background">
+      <div className="max-w-4xl mx-auto p-6">
+        {/* Header */}
+        <div className="text-center mb-12">
+          <h1 className="text-4xl font-bold mb-4 bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+            IFRS AI Assistant
+          </h1>
+          <p className="text-muted-foreground text-lg">
+            Provide background context and ask multiple questions for comprehensive IFRS guidance
+          </p>
         </div>
 
-        {/* Chat Area */}
-        <div className="flex-1 flex flex-col">
-          {showWelcome ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-8">
-              <div className="text-center mb-12">
-                <h1 className="text-4xl font-bold mb-4 bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
-                  Hello. How can I assist with IFRS today?
-                </h1>
-                <p className="text-muted-foreground text-lg">
-                  Upload documents, ask questions, or explore IFRS guidance
-                </p>
+        {/* Input Form */}
+        {!isSubmitted && (
+          <div className="glass border rounded-2xl p-8 space-y-8 mb-8">
+            <BackgroundInput
+              value={background}
+              onChange={setBackground}
+              disabled={isLoading}
+            />
+            
+            <QuestionsInput
+              questions={questions}
+              onChange={setQuestions}
+              disabled={isLoading}
+            />
+
+            <Button
+              onClick={handleSubmit}
+              disabled={!isFormValid || isLoading}
+              className="w-full h-12 text-lg bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-50"
+            >
+              <Send className="w-5 h-5 mr-2" />
+              Submit to IFRS Advisor
+            </Button>
+          </div>
+        )}
+
+        {/* Submitted Context Display */}
+        {isSubmitted && (
+          <div className="glass border rounded-2xl p-6 mb-8">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-primary">Your Submission</h3>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleReset}
+                className="border-primary/20 text-primary hover:bg-primary/10"
+              >
+                Start New Session
+              </Button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <h4 className="font-medium text-sm text-muted-foreground mb-2">Background:</h4>
+                <p className="text-foreground">{background}</p>
               </div>
               
-              <SuggestionCards onSuggestionClick={handleSuggestionClick} />
-            </div>
-          ) : (
-            <div className="flex-1 overflow-y-auto p-6">
-              <div className="max-w-4xl mx-auto">
-                {messages.map((message) => (
-                  <ChatMessage
-                    key={message.id}
-                    message={message}
-                    onEscalate={message.confidence && message.confidence < 0.7 ? handleEscalate : undefined}
-                  />
-                ))}
-                {isThinking && <ThinkingAnimation />}
+              <div>
+                <h4 className="font-medium text-sm text-muted-foreground mb-2">Questions:</h4>
+                <ul className="space-y-1">
+                  {questions.filter(q => q.trim()).map((question, index) => (
+                    <li key={index} className="text-foreground">
+                      {index + 1}. {question}
+                    </li>
+                  ))}
+                </ul>
               </div>
             </div>
-          )}
-
-          {/* Input Area */}
-          <div className="border-t border-[hsl(var(--glass-border))] p-6">
-            <ChatInput
-              onSendMessage={handleSendMessage}
-              onUploadFile={handleUploadFile}
-            />
           </div>
-        </div>
+        )}
+
+        {/* Chat Responses */}
+        <ChatResponse messages={messages} isLoading={isLoading} />
       </div>
     </div>
   );
