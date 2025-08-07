@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ChatSidebar } from "@/components/ChatSidebar";
 import { SuggestionCards } from "@/components/SuggestionCards";
 import { ChatInput } from "@/components/ChatInput";
-import { MetadataFormData } from "@/components/MetadataForm";
+import { ScenarioFormData } from "@/components/ScenarioBuilder";
 import { UserProfile } from "@/components/UserProfile";
 import { ChatMessage } from "@/components/ChatMessage";
 import { ThinkingAnimation } from "@/components/ThinkingAnimation";
@@ -32,7 +32,7 @@ const Index = () => {
     setMessages([]);
   };
 
-  const handleSendMessage = async (content: string, metadata?: MetadataFormData) => {
+  const handleSendMessage = async (content: string, scenario?: ScenarioFormData) => {
     const userMessage: Message = {
       id: Date.now().toString(),
       type: "user",
@@ -51,12 +51,10 @@ const Index = () => {
         },
         body: JSON.stringify({
           question: content,
-          ...(metadata && {
-            ifrs_standard: metadata.ifrs_standard,
-            topic: metadata.topic,
-            document_type: metadata.document_type,
-            jurisdiction: metadata.jurisdiction,
-            intended_use: metadata.intended_use,
+          ...(scenario && {
+            scenario: scenario.scenario,
+            document_type: scenario.document_type,
+            company_name: scenario.company_name,
           })
         }),
       });
