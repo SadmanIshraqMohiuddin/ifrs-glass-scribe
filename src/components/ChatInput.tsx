@@ -2,18 +2,27 @@ import { useState } from "react";
 import { Paperclip, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { MetadataForm, MetadataFormData } from "./MetadataForm";
 
 interface ChatInputProps {
-  onSendMessage: (message: string) => void;
+  onSendMessage: (message: string, metadata?: MetadataFormData) => void;
   onUploadFile: () => void;
 }
 
 export function ChatInput({ onSendMessage, onUploadFile }: ChatInputProps) {
   const [message, setMessage] = useState("");
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [metadata, setMetadata] = useState<MetadataFormData>({
+    ifrs_standard: "",
+    topic: "",
+    document_type: "",
+    jurisdiction: "",
+    intended_use: "",
+  });
 
   const handleSubmit = () => {
     if (message.trim()) {
-      onSendMessage(message);
+      onSendMessage(message, metadata);
       setMessage("");
     }
   };
@@ -27,6 +36,13 @@ export function ChatInput({ onSendMessage, onUploadFile }: ChatInputProps) {
 
   return (
     <div className="w-full max-w-4xl mx-auto p-4">
+      <MetadataForm
+        isOpen={isFormOpen}
+        onToggle={() => setIsFormOpen(!isFormOpen)}
+        onDataChange={setMetadata}
+        data={metadata}
+      />
+      
       <div className="glass border rounded-full p-2 flex items-center gap-2">
         <Button
           variant="ghost"

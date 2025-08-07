@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ChatSidebar } from "@/components/ChatSidebar";
 import { SuggestionCards } from "@/components/SuggestionCards";
 import { ChatInput } from "@/components/ChatInput";
+import { MetadataFormData } from "@/components/MetadataForm";
 import { UserProfile } from "@/components/UserProfile";
 import { ChatMessage } from "@/components/ChatMessage";
 import { ThinkingAnimation } from "@/components/ThinkingAnimation";
@@ -31,7 +32,7 @@ const Index = () => {
     setMessages([]);
   };
 
-  const handleSendMessage = async (content: string) => {
+  const handleSendMessage = async (content: string, metadata?: MetadataFormData) => {
     const userMessage: Message = {
       id: Date.now().toString(),
       type: "user",
@@ -49,7 +50,14 @@ const Index = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          question: content
+          question: content,
+          ...(metadata && {
+            ifrs_standard: metadata.ifrs_standard,
+            topic: metadata.topic,
+            document_type: metadata.document_type,
+            jurisdiction: metadata.jurisdiction,
+            intended_use: metadata.intended_use,
+          })
         }),
       });
 
