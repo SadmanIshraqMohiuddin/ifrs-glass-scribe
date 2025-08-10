@@ -48,28 +48,48 @@ const Index = () => {
     setIsSubmitted(true);
     setMessages([]);
 
-    // Create WebSocket connection
-    wsRef.current = new WebSocket("wss://104.248.169.227:8443/ws/rag/");
+    // Create WebSocket connection (verbose logging)
+    const wsUrl = "wss://104.248.169.227:8443/ws/rag/";
+    console.info("[WS] Connecting to", wsUrl);
+    wsRef.current = new WebSocket(wsUrl);
 
     wsRef.current.onopen = () => {
       const payload = {
         type: "process_questions",
         background: background.trim(),
         questions: validQuestions,
-        model: "gpt-4o-mini"
+        model: "gpt-4o-mini",
       };
-
-      wsRef.current?.send(JSON.stringify(payload));
+      const payloadStr = JSON.stringify(payload);
+      console.info("[WS] Opened. Sending payload:", {
+        length: payloadStr.length,
+        preview: payloadStr.slice(0, 500),
+      });
+      try {
+        wsRef.current?.send(payloadStr);
+      } catch (err) {
+        console.error("[WS] Send failed:", err);
+        toast({
+          title: "Failed to send request",
+          description: String(err),
+          variant: "destructive",
+        });
+      }
     };
 
     wsRef.current.onmessage = (event) => {
+      const raw = typeof event.data === "string" ? event.data : "";
+      console.debug("[WS] Message received:", {
+        length: raw.length,
+        preview: raw.slice(0, 500),
+      });
       try {
-        const data = JSON.parse(event.data);
-        
+        const data = JSON.parse(raw);
+        console.debug("[WS] Parsed message:", data);
         if (data.type === "answer" || data.type === "summary") {
           const message: ChatMessage = {
             ...data,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
           };
           
           setMessages(prev => [...prev, message]);
@@ -83,20 +103,37 @@ const Index = () => {
           }, 100);
         }
       } catch (error) {
-        console.error("Error parsing WebSocket message:", error);
+        console.error("[WS] Error parsing message:", error, { rawPreview: raw.slice(0, 500) });
+        toast({
+          title: "Invalid response received",
+          description: "We received an unexpected message format from the server.",
+          variant: "destructive",
+        });
       }
     };
 
-    wsRef.current.onclose = () => {
+    wsRef.current.onclose = (event) => {
+      console.warn("[WS] Closed:", {
+        code: event.code,
+        reason: event.reason,
+        wasClean: event.wasClean,
+      });
       setIsLoading(false);
+      if (!event.wasClean) {
+        toast({
+          title: "Connection closed unexpectedly",
+          description: `Code ${event.code}${event.reason ? `: ${event.reason}` : ""}`,
+          variant: "destructive",
+        });
+      }
     };
 
     wsRef.current.onerror = (error) => {
-      console.error("WebSocket error:", error);
+      console.error("[WS] Error event:", error);
       setIsLoading(false);
       toast({
         title: "Connection Error",
-        description: "Failed to connect to IFRS Advisor. Please try again.",
+        description: "Failed to connect to IFRS Advisor. Check network and try again.",
         variant: "destructive",
       });
     };
@@ -117,6 +154,7 @@ const Index = () => {
   useEffect(() => {
     return () => {
       if (wsRef.current) {
+        console.info("[WS] Component unmount: closing socket");
         wsRef.current.close();
       }
     };
