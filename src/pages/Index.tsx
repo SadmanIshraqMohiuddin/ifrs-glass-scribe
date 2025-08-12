@@ -72,7 +72,11 @@ const Index = () => {
         console.debug("[WS] Message received:", { length: raw.length, preview: raw.slice(0, 200) });
         try {
           const data = JSON.parse(raw);
-          console.debug("[WS] Parsed message:", { type: data.type, keys: Object.keys(data || {}) });
+          console.debug("[WS] Parsed message:", { type: (data as any)?.type, keys: Object.keys(data || {}) });
+          if (data == null || (typeof data === "object" && !("type" in (data as any))) || (data as any).type == null || (data as any).type === "null") {
+            console.warn("[WS] Null/unknown message received; ignoring to keep UI intact.", { preview: raw.slice(0, 200) });
+            return;
+          }
           if (data.type === "answer") {
             const msg: ChatMessage = {
               type: "answer",
