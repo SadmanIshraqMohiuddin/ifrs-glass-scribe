@@ -42,70 +42,120 @@ const Index = () => {
     wsRef.current = new WebSocket(wsUrl);
 
     wsRef.current.onopen = () => {
+      console.info("[WS] Opened:", { url: wsUrl, readyState: wsRef.current?.readyState });
       try {
         const payload = {
           type: "process_questions",
-          background: "Company A owns an office building classified as investment property under IAS 40. The company uses the fair value model. It also holds an internally developed patent with no observable market data, projected to generate income over the next 5 years. The finance team must ensure correct valuation and disclosure of these assets under IFRS 13.",
+          background:
+            "Company A owns an office building classified as investment property under IAS 40. The company uses the fair value model. It also holds an internally developed patent with no observable market data, projected to generate income over the next 5 years. The finance team must ensure correct valuation and disclosure of these assets under IFRS 13.",
           questions: [
             "How should Company A value its investment property under the fair value model?",
             "What is the most appropriate valuation technique for the internally developed patent?",
-            "What disclosure requirements apply to Level 3 fair value measurements under IFRS 13?"
+            "What disclosure requirements apply to Level 3 fair value measurements under IFRS 13?",
           ],
-          model: "gpt-4o-mini"
+          model: "gpt-4o-mini",
         };
-        wsRef.current?.send(JSON.stringify(payload));
-        console.info("[WS] Opened and payload sent.");
+        const raw = JSON.stringify(payload);
+        wsRef.current?.send(raw);
+        console.info("[WS] Payload sent:", { bytes: raw.length });
       } catch (err) {
         console.error("[WS] Failed to send payload:", err);
+        toast?.({
+          title: "WebSocket send failed",
+          description: "Could not send initial payload. See console for details.",
+          variant: "destructive",
+        });
       }
     };
 
     wsRef.current.onmessage = (event) => {
-      const raw = typeof event.data === "string" ? event.data : "";
-      try {
-        const data = JSON.parse(raw);
-        if (data.type === "answer") {
-          const msg: ChatMessage = {
-            type: "answer",
-            question: data.question,
-            answer: data.answer,
-            question_number: data.question_number,
-            timestamp: new Date().toISOString(),
-          };
-          setMessages(prev => [...prev, msg]);
-        } else if (data.type === "summary") {
-          const msg: ChatMessage = {
-            type: "summary",
-            summary: data.summary,
-            timestamp: new Date().toISOString(),
-          };
-          pendingSummaryRef.current = msg;
-        } else if (data.type === "complete") {
-          if (pendingSummaryRef.current) {
-            setMessages(prev => [...prev, pendingSummaryRef.current!]);
-            pendingSummaryRef.current = null;
+      const isBlob = typeof Blob !== "undefined" && event.data instanceof Blob;
+      const processRaw = (raw: string) => {
+        console.debug("[WS] Message received:", { length: raw.length, preview: raw.slice(0, 200) });
+        try {
+          const data = JSON.parse(raw);
+          console.debug("[WS] Parsed message:", { type: data.type, keys: Object.keys(data || {}) });
+          if (data.type === "answer") {
+            const msg: ChatMessage = {
+              type: "answer",
+              question: data.question,
+              answer: data.answer,
+              question_number: data.question_number,
+              timestamp: new Date().toISOString(),
+            };
+            setMessages((prev) => [...prev, msg]);
+          } else if (data.type === "summary") {
+            const msg: ChatMessage = {
+              type: "summary",
+              summary: data.summary,
+              timestamp: new Date().toISOString(),
+            };
+            pendingSummaryRef.current = msg;
+          } else if (data.type === "complete") {
+            if (pendingSummaryRef.current) {
+              setMessages((prev) => [...prev, pendingSummaryRef.current!]);
+              pendingSummaryRef.current = null;
+            }
+            setIsLoading(false);
+            try {
+              wsRef.current?.close();
+            } catch {}
+          } else {
+            console.debug("[WS] Ignored message type:", data.type);
           }
-          setIsLoading(false);
-          try { wsRef.current?.close(); } catch {}
-        } else {
-          console.debug("[WS] Ignored message type:", data.type);
+        } catch (err) {
+          console.error("[WS] Failed to parse message:", err, { preview: raw.slice(0, 200) });
+          toast?.({
+            title: "WebSocket message parse error",
+            description: "Received non-JSON or malformed data. See console for details.",
+            variant: "destructive",
+          });
         }
-      } catch (err) {
-        console.error("[WS] Failed to parse message:", err, { preview: raw.slice(0, 200) });
+      };
+
+      if (isBlob) {
+        event.data
+          .text()
+          .then(processRaw)
+          .catch((e: unknown) => {
+            console.error("[WS] Failed to read Blob message:", e);
+          });
+      } else {
+        const raw = typeof event.data === "string" ? event.data : "";
+        processRaw(raw);
       }
     };
 
     wsRef.current.onclose = (event) => {
-      console.warn("[WS] Closed:", {
+      const info = {
         code: event.code,
         reason: event.reason,
         wasClean: event.wasClean,
-      });
+        readyState: wsRef.current?.readyState,
+      };
+      console.warn("[WS] Closed:", info);
+      if (event.code === 1006) {
+        console.warn(
+          "[WS] Abnormal closure (1006). Potential causes: TLS/cert issues on wss (IP with certificate), network/port blocked, server crash, or proxy upgrade blocked."
+        );
+        console.warn("[WS] Page protocol:", window.location.protocol, "Connecting to:", wsUrl);
+        toast?.({
+          title: "WebSocket connection closed (1006)",
+          description:
+            "Likely TLS/cert or network issue. Check server certificate/port. See console for details.",
+          variant: "destructive",
+        });
+      }
       setIsLoading(false);
     };
 
     wsRef.current.onerror = (error) => {
-      console.error("[WS] Error event:", error);
+      console.error("[WS] Error event:", error, { pageProtocol: window.location.protocol, wsUrl });
+      toast?.({
+        title: "WebSocket error",
+        description: "See console for details. Connection may be blocked or certificate invalid.",
+        variant: "destructive",
+      });
       setIsLoading(false);
     };
   };
