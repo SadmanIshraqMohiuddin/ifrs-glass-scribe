@@ -23,44 +23,76 @@ const Index = () => {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const { toast } = useToast();
+  const pendingSummaryRef = useRef<ChatMessage | null>(null);
 
   const handleSubmit = () => {
-    if (!background.trim()) {
-      toast({
-        title: "Background Required",
-        description: "Please provide a background description before submitting.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const validQuestions = questions.filter(q => q.trim());
-    if (validQuestions.length === 0) {
-      toast({
-        title: "Questions Required",
-        description: "Please add at least one question.",
-        variant: "destructive",
-      });
-      return;
+    // Prepare for new stream
+    setMessages([]);
+    setIsLoading(true);
+    // Close any existing socket
+    if (wsRef.current) {
+      try { wsRef.current.close(); } catch {}
     }
 
     // Only connecting to WebSocket; no UI state changes or payload sent.
 
     // Create WebSocket connection (verbose logging)
-    const wsUrl = "wss://104.248.169.227:8443/ws/rag/";
+    const wsUrl = "wss://104.248.169.227:8000/ws/rag/";
     console.info("[WS] Connecting to", wsUrl);
     wsRef.current = new WebSocket(wsUrl);
 
     wsRef.current.onopen = () => {
-      console.info("[WS] Opened. Not sending any payload per request.");
+      try {
+        const payload = {
+          type: "process_questions",
+          background: "Company A owns an office building classified as investment property under IAS 40. The company uses the fair value model. It also holds an internally developed patent with no observable market data, projected to generate income over the next 5 years. The finance team must ensure correct valuation and disclosure of these assets under IFRS 13.",
+          questions: [
+            "How should Company A value its investment property under the fair value model?",
+            "What is the most appropriate valuation technique for the internally developed patent?",
+            "What disclosure requirements apply to Level 3 fair value measurements under IFRS 13?"
+          ],
+          model: "gpt-4o-mini"
+        };
+        wsRef.current?.send(JSON.stringify(payload));
+        console.info("[WS] Opened and payload sent.");
+      } catch (err) {
+        console.error("[WS] Failed to send payload:", err);
+      }
     };
 
     wsRef.current.onmessage = (event) => {
       const raw = typeof event.data === "string" ? event.data : "";
-      console.debug("[WS] Message received (no processing):", {
-        length: raw.length,
-        preview: raw.slice(0, 500),
-      });
+      try {
+        const data = JSON.parse(raw);
+        if (data.type === "answer") {
+          const msg: ChatMessage = {
+            type: "answer",
+            question: data.question,
+            answer: data.answer,
+            question_number: data.question_number,
+            timestamp: new Date().toISOString(),
+          };
+          setMessages(prev => [...prev, msg]);
+        } else if (data.type === "summary") {
+          const msg: ChatMessage = {
+            type: "summary",
+            summary: data.summary,
+            timestamp: new Date().toISOString(),
+          };
+          pendingSummaryRef.current = msg;
+        } else if (data.type === "complete") {
+          if (pendingSummaryRef.current) {
+            setMessages(prev => [...prev, pendingSummaryRef.current!]);
+            pendingSummaryRef.current = null;
+          }
+          setIsLoading(false);
+          try { wsRef.current?.close(); } catch {}
+        } else {
+          console.debug("[WS] Ignored message type:", data.type);
+        }
+      } catch (err) {
+        console.error("[WS] Failed to parse message:", err, { preview: raw.slice(0, 200) });
+      }
     };
 
     wsRef.current.onclose = (event) => {
@@ -69,10 +101,12 @@ const Index = () => {
         reason: event.reason,
         wasClean: event.wasClean,
       });
+      setIsLoading(false);
     };
 
     wsRef.current.onerror = (error) => {
       console.error("[WS] Error event:", error);
+      setIsLoading(false);
     };
   };
 
