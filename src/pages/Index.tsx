@@ -1,3 +1,4 @@
+
 import { useState, useRef, useEffect } from "react";
 import { Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -29,35 +30,32 @@ const Index = () => {
     // Prepare for new stream
     setMessages([]);
     setIsLoading(true);
+    setIsSubmitted(true);
+    
     // Close any existing socket
     if (wsRef.current) {
       try { wsRef.current.close(); } catch {}
     }
 
-    // Only connecting to WebSocket; no UI state changes or payload sent.
-
     // Create WebSocket connection (verbose logging)
-    const wsUrl = "wss://104.248.169.227:8000/ws/rag/";
+    const wsUrl = "wss://104.248.169.227:8443/ws/rag/";
     console.info("[WS] Connecting to", wsUrl);
     wsRef.current = new WebSocket(wsUrl);
 
     wsRef.current.onopen = () => {
       console.info("[WS] Opened:", { url: wsUrl, readyState: wsRef.current?.readyState });
       try {
+        // Filter out empty questions and prepare payload with actual form data
+        const filteredQuestions = questions.filter(q => q.trim());
         const payload = {
           type: "process_questions",
-          background:
-            "Company A owns an office building classified as investment property under IAS 40. The company uses the fair value model. It also holds an internally developed patent with no observable market data, projected to generate income over the next 5 years. The finance team must ensure correct valuation and disclosure of these assets under IFRS 13.",
-          questions: [
-            "How should Company A value its investment property under the fair value model?",
-            "What is the most appropriate valuation technique for the internally developed patent?",
-            "What disclosure requirements apply to Level 3 fair value measurements under IFRS 13?",
-          ],
+          background: background,
+          questions: filteredQuestions,
           model: "gpt-4o-mini",
         };
         const raw = JSON.stringify(payload);
         wsRef.current?.send(raw);
-        console.info("[WS] Payload sent:", { bytes: raw.length });
+        console.info("[WS] Payload sent:", { bytes: raw.length, payload });
       } catch (err) {
         console.error("[WS] Failed to send payload:", err);
         toast?.({
